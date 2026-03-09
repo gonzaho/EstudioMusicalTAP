@@ -99,8 +99,11 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState("");
 
-  // 👇 ACORDATE DE PONER TU MAIL DE ADMIN ACÁ 👇
-  const CORREO_ADMIN = "tamisnm@gmail.com";
+  // 👇 ACORDATE DE PONER EL MAIL DE LA PROFE ACÁ 👇
+const CORREOS_ADMIN = [
+    "tamisnm@gmail.com",
+    "gonzaloivelasco2@gmail.com" 
+  ];
 
   const [usuarioFirebase, setUsuarioFirebase] = useState(null);
   const [emailLogin, setEmailLogin] = useState("");
@@ -315,11 +318,14 @@ export default function App() {
     cargarDatos();
   };
 
+  // NUEVA FUNCIÓN: BORRAR ALUMNO Y SUS TURNOS
   const borrarAlumno = async () => {
     const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
     if (!alumno) return;
 
-    const confirmacion = window.confirm(`⚠️ ¿Estás segura de que querés borrar a ${alumno.nombre} definitivamente? Esto también liberará sus horarios fijos en la agenda.`);
+    const confirmacion = window.confirm(
+      `⚠️ ¿Estás segura de que querés borrar a ${alumno.nombre} definitivamente? Esto también liberará sus horarios fijos en la agenda.`
+    );
     if (!confirmacion) return;
 
     setMensaje("⏳ Borrando alumno...");
@@ -328,7 +334,7 @@ export default function App() {
       await deleteDoc(doc(db, "alumnos", alumno.id));
 
       // 2. Buscamos y borramos sus turnos fijos para evitar fantasmas
-      const susTurnos = turnosFijos.filter(t => t.alumnoId === alumno.id);
+      const susTurnos = turnosFijos.filter((t) => t.alumnoId === alumno.id);
       for (let turno of susTurnos) {
         await deleteDoc(doc(db, "turnos_fijos", turno.id));
       }
@@ -378,7 +384,7 @@ export default function App() {
       [claveUnica]: !prev[claveUnica],
     }));
 
-  const esAdmin = usuarioFirebase?.email === CORREO_ADMIN;
+const esAdmin = CORREOS_ADMIN.includes(usuarioFirebase?.email);
 
   // ==========================================
   // PANTALLA 1: LOGIN
@@ -681,6 +687,7 @@ export default function App() {
               marginBottom: "30px",
             }}
           >
+            {/* CAJA 1: NUEVO ALUMNO */}
             <div
               style={{
                 backgroundColor: theme.card,
@@ -727,6 +734,7 @@ export default function App() {
               </div>
             </div>
 
+            {/* CAJA 2: ACREDITAR PAGO */}
             <div
               style={{
                 backgroundColor: theme.card,
@@ -782,6 +790,7 @@ export default function App() {
               </div>
             </div>
 
+            {/* CAJA 3: ASIGNAR HORARIO */}
             <div
               style={{
                 backgroundColor: theme.card,
@@ -848,6 +857,53 @@ export default function App() {
                 </BotonAzul>
               </div>
             </div>
+
+            {/* NUEVA CAJA 4: ELIMINAR ALUMNO */}
+            <div
+              style={{
+                backgroundColor: theme.card,
+                padding: "15px",
+                borderRadius: theme.radius,
+                boxShadow: theme.shadow,
+                border: "1px solid #ffebee"
+              }}
+            >
+              <h3
+                style={{
+                  margin: "0 0 15px 0",
+                  color: "#d32f2f", 
+                  fontSize: "16px",
+                  fontWeight: "600",
+                }}
+              >
+                Eliminar Alumno
+              </h3>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                }}
+              >
+                <SelectMinimalista
+                  value={alumnoSeleccionado}
+                  onChange={(e) => setAlumnoSeleccionado(e.target.value)}
+                >
+                  {alumnos.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.nombre}
+                    </option>
+                  ))}
+                </SelectMinimalista>
+                <BotonAzul 
+                  onClick={borrarAlumno}
+                  style={{ backgroundColor: "#ff3b30" }} // Rojo alerta
+                >
+                  🗑️ Borrar definitivamente
+                </BotonAzul>
+              </div>
+            </div>
+            
           </div>
 
           {/* CONTROLES DE AGENDA */}
