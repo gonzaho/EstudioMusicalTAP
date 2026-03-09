@@ -315,6 +315,32 @@ export default function App() {
     cargarDatos();
   };
 
+  const borrarAlumno = async () => {
+    const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
+    if (!alumno) return;
+
+    const confirmacion = window.confirm(`⚠️ ¿Estás segura de que querés borrar a ${alumno.nombre} definitivamente? Esto también liberará sus horarios fijos en la agenda.`);
+    if (!confirmacion) return;
+
+    setMensaje("⏳ Borrando alumno...");
+    try {
+      // 1. Borramos al alumno de la base de datos
+      await deleteDoc(doc(db, "alumnos", alumno.id));
+
+      // 2. Buscamos y borramos sus turnos fijos para evitar fantasmas
+      const susTurnos = turnosFijos.filter(t => t.alumnoId === alumno.id);
+      for (let turno of susTurnos) {
+        await deleteDoc(doc(db, "turnos_fijos", turno.id));
+      }
+
+      setMensaje(`🗑️ Alumno eliminado correctamente.`);
+      cargarDatos(); // Recargamos todo
+    } catch (error) {
+      setMensaje("❌ Error al borrar el alumno.");
+    }
+    setTimeout(() => setMensaje(""), 4000);
+  };
+
   const procesarClaseDelDia = async (turno, fechaExacta, accion) => {
     setMensaje("⏳ Procesando...");
     try {
