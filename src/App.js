@@ -100,7 +100,7 @@ export default function App() {
   const [mensaje, setMensaje] = useState("");
 
   // 👇 ACORDATE DE PONER TU MAIL DE ADMIN ACÁ 👇
-  const CORREO_ADMIN = "gonzaloivelasco@gmail.com";
+  const CORREO_ADMIN = "tamisnm@gmail.com";
 
   const [usuarioFirebase, setUsuarioFirebase] = useState(null);
   const [emailLogin, setEmailLogin] = useState("");
