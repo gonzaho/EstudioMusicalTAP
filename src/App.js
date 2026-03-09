@@ -163,7 +163,14 @@ const CORREOS_ADMIN = [
       setEmailLogin("");
       setPasswordLogin("");
     } catch (error) {
-      setMensaje("❌ Error. La contraseña debe tener al menos 6 caracteres.");
+      // AQUÍ ESTÁ EL TRUCO: Traducimos el error real
+      if (error.code === 'auth/email-already-in-use') {
+        setMensaje("❌ Este correo ya tiene una cuenta. ¡Intentá iniciar sesión!");
+      } else if (error.code === 'auth/weak-password') {
+        setMensaje("❌ La contraseña debe tener al menos 6 caracteres.");
+      } else {
+        setMensaje("❌ Error: " + error.message);
+      }
       setTimeout(() => setMensaje(""), 5000);
     }
   };
