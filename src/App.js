@@ -100,10 +100,7 @@ export default function App() {
   const [mensaje, setMensaje] = useState("");
 
   // 👇 ACORDATE DE PONER EL MAIL DE LA PROFE ACÁ 👇
-const CORREOS_ADMIN = [
-    "tamisnm@gmail.com",
-    "gonzaloivelasco2@gmail.com" 
-  ];
+const CORREOS_ADMIN = ["tamisnm@gmail.com", "gonzaloivelasco2@gmail.com"];
 
   const [usuarioFirebase, setUsuarioFirebase] = useState(null);
   const [emailLogin, setEmailLogin] = useState("");
