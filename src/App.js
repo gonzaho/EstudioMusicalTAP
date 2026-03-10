@@ -128,8 +128,8 @@ export default function App() {
   const [bloquesExpandidos, setBloquesExpandidos] = useState({});
 
   // ESTADOS PARA FORMULARIOS
-  const [acordeonAbierto, setAcordeonAbierto] = useState(""); // Controla qué menú está abierto
-  const [alumnoSeleccionado, setAlumnoSeleccionado] = useState("");
+  const [acordeonAbierto, setAcordeonAbierto] = useState(""); 
+  const [alumnoSeleccionado, setAlumnoSeleccionado] = useState(""); // Ahora arranca vacío
   const [diaFijoSeleccionado, setDiaFijoSeleccionado] = useState("Lunes");
   const [horaSeleccionada, setHoraSeleccionada] = useState("18:00");
   const [tipoClase, setTipoClase] = useState("grupal");
@@ -138,7 +138,7 @@ export default function App() {
   const [packSeleccionado, setPackSeleccionado] = useState(4);
   
   // ESTADOS PARA EDITAR ALUMNO
-  const [alumnoAEditarId, setAlumnoAEditarId] = useState("");
+  const [alumnoAEditarId, setAlumnoAEditarId] = useState(""); // Ahora arranca vacío
   const [editNombre, setEditNombre] = useState("");
   const [editEmail, setEditEmail] = useState("");
 
@@ -207,7 +207,7 @@ export default function App() {
     setAcordeonAbierto("");
   };
 
-  // GENERADOR DE DÍAS (Ahora incluye Sábado dinámicamente)
+  // GENERADOR DE DÍAS
   const getDiasVisualizacion = (offset, vista) => {
     const hoy = new Date();
     const dia = hoy.getDay();
@@ -222,7 +222,6 @@ export default function App() {
     for (let s = 0; s < cantidadSemanas; s++) {
       const lunesSemanaActual = new Date(lunesBase);
       lunesSemanaActual.setDate(lunesSemanaActual.getDate() + s * 7);
-      // Iteramos hasta 6 para incluir el Sábado
       for (let i = 0; i < 6; i++) {
         const fecha = new Date(lunesSemanaActual);
         fecha.setDate(lunesSemanaActual.getDate() + i);
@@ -251,14 +250,6 @@ export default function App() {
         .map((doc) => ({ id: doc.id, ...doc.data() }))
         .sort((a, b) => a.nombre.localeCompare(b.nombre));
       setAlumnos(listaAlumnos);
-      if (listaAlumnos.length > 0) {
-        if (!alumnoSeleccionado) setAlumnoSeleccionado(listaAlumnos[0].id);
-        if (!alumnoAEditarId) {
-          setAlumnoAEditarId(listaAlumnos[0].id);
-          setEditNombre(listaAlumnos[0].nombre);
-          setEditEmail(listaAlumnos[0].email);
-        }
-      }
 
       const turnosSnap = await getDocs(collection(db, "turnos_fijos"));
       setTurnosFijos(turnosSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
@@ -302,6 +293,7 @@ export default function App() {
         email: nuevoAlumnoEmail.toLowerCase(),
         creditos: { individual: 0, grupal: 0 },
         ultimoPago: "Sin pagos",
+        historialPagos: [],
       });
       setNuevoAlumnoNombre("");
       setNuevoAlumnoEmail("");
@@ -314,7 +306,12 @@ export default function App() {
   };
 
   const guardarEdicionAlumno = async () => {
-    if (!alumnoAEditarId || !editNombre.trim() || !editEmail.trim()) return;
+    if (!alumnoAEditarId) {
+      setMensaje("⚠️ Seleccioná un alumno para editar.");
+      setTimeout(() => setMensaje(""), 4000);
+      return;
+    }
+    if (!editNombre.trim() || !editEmail.trim()) return;
     setMensaje("⏳ Actualizando...");
     try {
       await updateDoc(doc(db, "alumnos", alumnoAEditarId), {
@@ -330,6 +327,11 @@ export default function App() {
   };
 
   const borrarAlumno = async () => {
+    if (!alumnoSeleccionado) {
+      setMensaje("⚠️ Seleccioná un alumno primero.");
+      setTimeout(() => setMensaje(""), 4000);
+      return;
+    }
     const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
     if (!alumno) return;
     const confirmacion = window.confirm(`⚠️ ¿Estás segura de que querés borrar a ${alumno.nombre} definitivamente? Se liberarán sus horarios fijos.`);
@@ -351,17 +353,32 @@ export default function App() {
   };
 
   const registrarPago = async () => {
+    if (!alumnoSeleccionado) {
+      setMensaje("⚠️ Seleccioná un alumno primero.");
+      setTimeout(() => setMensaje(""), 4000);
+      return;
+    }
     const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
     if (!alumno) return;
     setMensaje("⏳ Guardando pago...");
     try {
       const nuevosCreditos = alumno.creditos[tipoClase] + parseInt(packSeleccionado);
       const fechaHoy = new Date().toLocaleDateString();
+      
+      const nuevoPago = {
+        fecha: fechaHoy,
+        tipo: tipoClase,
+        cantidad: parseInt(packSeleccionado)
+      };
+      const historialActualizado = [...(alumno.historialPagos || []), nuevoPago];
+
       await updateDoc(doc(db, "alumnos", alumno.id), {
         ["creditos." + tipoClase]: nuevosCreditos,
         ultimoPago: fechaHoy,
+        historialPagos: historialActualizado
       });
-      setMensaje(`💰 ¡Pago registrado!`);
+      
+      setMensaje(`💰 ¡Pago registrado y añadido al historial!`);
       cargarDatos();
     } catch (error) {
       setMensaje("❌ Error al guardar el pago.");
@@ -370,6 +387,11 @@ export default function App() {
   };
 
   const agendarTurnoFijo = async () => {
+    if (!alumnoSeleccionado) {
+      setMensaje("⚠️ Seleccioná un alumno primero.");
+      setTimeout(() => setMensaje(""), 4000);
+      return;
+    }
     const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
     setMensaje("⏳ Asignando turno...");
     try {
@@ -485,10 +507,17 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "5px", backgroundColor: theme.card, padding: "6px 12px", borderRadius: "20px", border: `1px solid ${theme.border}`, boxShadow: theme.shadow }}>
                 <span style={{ fontSize: "12px", color: theme.textSec, fontWeight: "500" }}>Ver alumno:</span>
-                <select value={alumnoSeleccionado} onChange={(e) => setAlumnoSeleccionado(e.target.value)} style={{ border: "none", outline: "none", fontSize: "12px", color: theme.text, fontWeight: "600", backgroundColor: "transparent", maxWidth: "100px" }}>
+                
+                {/* SELECTOR HEADER CORREGIDO */}
+                <select value={alumnoSeleccionado} onChange={(e) => setAlumnoSeleccionado(e.target.value)} style={{ border: "none", outline: "none", fontSize: "12px", color: theme.text, fontWeight: "600", backgroundColor: "transparent", maxWidth: "120px" }}>
+                  <option value="" disabled>Designar alumno</option>
                   {alumnos.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
                 </select>
-                <button onClick={() => setAdminVistaAlumno(alumnos.find((a) => a.id === alumnoSeleccionado))} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginLeft: "2px" }} title="Ver panel">👀</button>
+                
+                <button onClick={() => {
+                  if(!alumnoSeleccionado) { setMensaje("⚠️ Seleccioná un alumno para ver su panel."); setTimeout(() => setMensaje(""), 4000); return; }
+                  setAdminVistaAlumno(alumnos.find((a) => a.id === alumnoSeleccionado))
+                }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", marginLeft: "2px" }} title="Ver panel">👀</button>
               </div>
               <button onClick={cerrarSesion} style={{ padding: "6px 14px", backgroundColor: theme.card, color: theme.text, border: `1px solid ${theme.border}`, borderRadius: "20px", cursor: "pointer", fontSize: "12px", fontWeight: "500" }}>Salir</button>
             </div>
@@ -506,6 +535,7 @@ export default function App() {
             <Acordeon titulo="💰 Acreditar Pago" activo={acordeonAbierto === "pagos"} onClick={() => toggleAcordeon("pagos")}>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxWidth: "400px", paddingTop: "10px" }}>
                 <SelectMinimalista value={alumnoSeleccionado} onChange={(e) => setAlumnoSeleccionado(e.target.value)}>
+                  <option value="" disabled>Designar alumno</option>
                   {alumnos.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
                 </SelectMinimalista>
                 <div style={{ display: "flex", gap: "10px" }}>
@@ -526,6 +556,7 @@ export default function App() {
             <Acordeon titulo="📅 Asignar Horario Fijo" activo={acordeonAbierto === "horarios"} onClick={() => toggleAcordeon("horarios")}>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxWidth: "400px", paddingTop: "10px" }}>
                 <SelectMinimalista value={alumnoSeleccionado} onChange={(e) => setAlumnoSeleccionado(e.target.value)}>
+                  <option value="" disabled>Designar alumno</option>
                   {alumnos.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
                 </SelectMinimalista>
                 <div style={{ display: "flex", gap: "10px" }}>
@@ -581,6 +612,7 @@ export default function App() {
                   <h4 style={{ margin: "0 0 10px 0", color: theme.text }}>Editar Alumno</h4>
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     <SelectMinimalista value={alumnoAEditarId} onChange={(e) => seleccionarAlumnoAEditar(e.target.value)}>
+                      <option value="" disabled>Designar alumno</option>
                       {alumnos.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
                     </SelectMinimalista>
                     <InputMinimalista type="text" value={editNombre} onChange={(e) => setEditNombre(e.target.value)} />
@@ -593,6 +625,7 @@ export default function App() {
                   <h4 style={{ margin: "0 0 10px 0", color: "#d32f2f" }}>Eliminar Alumno</h4>
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     <SelectMinimalista value={alumnoSeleccionado} onChange={(e) => setAlumnoSeleccionado(e.target.value)}>
+                      <option value="" disabled>Designar alumno</option>
                       {alumnos.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
                     </SelectMinimalista>
                     <BotonAzul onClick={borrarAlumno} style={{ backgroundColor: "#ff3b30" }}>🗑️ Borrar definitivamente</BotonAzul>
@@ -623,8 +656,9 @@ export default function App() {
           </div>
 
           <div style={{ width: "100%", overflowX: "auto", paddingBottom: "10px" }}>
-            {/* GRILLA CON SÁBADO DINÁMICO */}
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${diasAMostrar.length}, minmax(68px, 1fr))`, gap: "6px", minWidth: "340px" }}>
+            
+            {/* AQUÍ ESTÁ LA MAGIA DEL CALENDARIO CUADRÍCULA */}
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${hayClasesElSabado ? 6 : 5}, minmax(68px, 1fr))`, gap: "6px", minWidth: "340px" }}>
               {diasAMostrar.map((diaObj, index) => {
                 const turnosDelDia = turnosFijos.filter((t) => t.diaSemana === diaObj.nombreBase).sort((a, b) => a.hora.localeCompare(b.hora));
                 const clasesAgrupadas = {};
@@ -718,6 +752,7 @@ export default function App() {
   }
 
   const clasesUsadasGrupales = registros.filter((r) => r.estado === "descontado" && turnosFijos.find((t) => t.id === r.turnoFijoId && t.alumnoId === miPerfil.id && t.tipo === "grupal")).length;
+  const clasesUsadasIndiv = registros.filter((r) => r.estado === "descontado" && turnosFijos.find((t) => t.id === r.turnoFijoId && t.alumnoId === miPerfil.id && t.tipo === "individual")).length;
 
   return (
     <div style={{ backgroundColor: theme.bg, minHeight: "100vh", fontFamily: globalFont, padding: "20px 10px" }}>
@@ -733,19 +768,50 @@ export default function App() {
           )}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px", marginBottom: "30px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "10px", marginBottom: "15px" }}>
           <div style={{ backgroundColor: theme.card, padding: "15px", borderRadius: theme.radius, boxShadow: theme.shadow, textAlign: "center" }}>
             <span style={{ fontSize: "11px", color: theme.textSec, fontWeight: "600", textTransform: "uppercase" }}>Disponibles</span>
-            <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{miPerfil.creditos?.grupal || 0}</div>
+            <div style={{ display: "flex", justifyContent: "space-around", marginTop: "10px" }}>
+              <div>
+                <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>{miPerfil.creditos?.grupal || 0}</div>
+                <div style={{ fontSize: "10px", color: theme.textSec }}>Grupales</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>{miPerfil.creditos?.individual || 0}</div>
+                <div style={{ fontSize: "10px", color: theme.textSec }}>Indiv.</div>
+              </div>
+            </div>
           </div>
           <div style={{ backgroundColor: theme.card, padding: "15px", borderRadius: theme.radius, boxShadow: theme.shadow, textAlign: "center" }}>
             <span style={{ fontSize: "11px", color: theme.textSec, fontWeight: "600", textTransform: "uppercase" }}>Asistidas</span>
-            <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{clasesUsadasGrupales}</div>
+            <div style={{ display: "flex", justifyContent: "space-around", marginTop: "10px" }}>
+              <div>
+                <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>{clasesUsadasGrupales}</div>
+                <div style={{ fontSize: "10px", color: theme.textSec }}>Grupales</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>{clasesUsadasIndiv}</div>
+                <div style={{ fontSize: "10px", color: theme.textSec }}>Indiv.</div>
+              </div>
+            </div>
           </div>
-          <div style={{ backgroundColor: theme.card, padding: "15px", borderRadius: theme.radius, boxShadow: theme.shadow, textAlign: "center" }}>
-            <span style={{ fontSize: "11px", color: theme.textSec, fontWeight: "600", textTransform: "uppercase" }}>Últ. Pago</span>
-            <div style={{ fontSize: "14px", fontWeight: "600", color: theme.text, marginTop: "10px" }}>{miPerfil.ultimoPago || "Nada"}</div>
-          </div>
+        </div>
+
+        <div style={{ marginBottom: "30px" }}>
+          <Acordeon titulo="💳 Historial de Pagos" activo={acordeonAbierto === "historial"} onClick={() => toggleAcordeon("historial")}>
+            {miPerfil.historialPagos && miPerfil.historialPagos.length > 0 ? (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {miPerfil.historialPagos.slice().reverse().map((pago, idx) => (
+                  <li key={idx} style={{ padding: "8px 0", borderBottom: `1px solid ${theme.inputBg}`, fontSize: "13px", color: theme.text, display: "flex", justifyContent: "space-between" }}>
+                    <strong>{pago.fecha}</strong>
+                    <span>+{pago.cantidad} {pago.tipo.substring(0,4)}.</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ fontSize: "13px", color: theme.textSec, margin: 0 }}>No hay pagos registrados aún.</p>
+            )}
+          </Acordeon>
         </div>
 
         {mensaje !== "" && <div style={{ backgroundColor: "#e8f5e9", color: "#2e7d32", padding: "10px", borderRadius: "8px", marginBottom: "15px", fontSize: "13px", fontWeight: "500", textAlign: "center" }}>{mensaje}</div>}
@@ -766,7 +832,7 @@ export default function App() {
         </div>
 
         <div style={{ width: "100%", overflowX: "auto", paddingBottom: "10px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${diasAMostrar.length}, minmax(68px, 1fr))`, gap: "6px", minWidth: "340px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${hayClasesElSabado ? 6 : 5}, minmax(68px, 1fr))`, gap: "6px", minWidth: "340px" }}>
             {diasAMostrar.map((diaObj, index) => {
               const misTurnosHoy = turnosFijos.filter((t) => t.diaSemana === diaObj.nombreBase && t.alumnoId === miPerfil.id).sort((a, b) => a.hora.localeCompare(b.hora));
               return (
