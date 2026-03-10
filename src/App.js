@@ -78,7 +78,6 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState("");
   
-  // NUEVO ESTADO: CONTROL DEL DESHACER
   const [deshacerActivo, setDeshacerActivo] = useState(null);
 
   const [usuarioFirebase, setUsuarioFirebase] = useState(null);
@@ -100,9 +99,12 @@ export default function App() {
   const [nuevoAlumnoNombre, setNuevoAlumnoNombre] = useState("");
   const [nuevoAlumnoEmail, setNuevoAlumnoEmail] = useState("");
   const [packSeleccionado, setPackSeleccionado] = useState(4);
+  
   const [alumnoAEditarId, setAlumnoAEditarId] = useState(""); 
   const [editNombre, setEditNombre] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [editCreditosGrupal, setEditCreditosGrupal] = useState(0);
+  const [editCreditosIndividual, setEditCreditosIndividual] = useState(0);
 
   const [fechaSuelta, setFechaSuelta] = useState(toLocalISO(new Date()));
   const [tipoBloqueo, setTipoBloqueo] = useState("dia_completo");
@@ -115,7 +117,6 @@ export default function App() {
   const [reprogramarFecha, setReprogramarFecha] = useState(toLocalISO(new Date()));
   const [reprogramarHora, setReprogramarHora] = useState("18:00");
 
-  // Efecto para ocultar el botón "Deshacer" a los 10 segundos
   useEffect(() => {
     let timer;
     if (deshacerActivo) {
@@ -244,10 +245,16 @@ export default function App() {
 
   const toggleAcordeon = (nombre) => setAcordeonAbierto(acordeonAbierto === nombre ? "" : nombre);
 
+  // SELECCIONAR ALUMNO PARA EDITAR (Ahora trae también los créditos)
   const seleccionarAlumnoAEditar = (id) => {
     setAlumnoAEditarId(id);
     const al = alumnos.find(a => a.id === id);
-    if(al) { setEditNombre(al.nombre); setEditEmail(al.email); }
+    if(al) { 
+      setEditNombre(al.nombre); 
+      setEditEmail(al.email); 
+      setEditCreditosGrupal(al.creditos?.grupal || 0);
+      setEditCreditosIndividual(al.creditos?.individual || 0);
+    }
   };
 
   const crearAlumno = async () => {
@@ -260,19 +267,25 @@ export default function App() {
     setTimeout(() => setMensaje(""), 4000);
   };
 
+  // GUARDAR EDICIÓN DE ALUMNO (Ahora actualiza los créditos forzados manualmente)
   const guardarEdicionAlumno = async () => {
     if (!alumnoAEditarId) { setMensaje("⚠️ Seleccioná alumno."); setTimeout(() => setMensaje(""), 4000); return; }
     setMensaje("⏳ Actualizando...");
     try {
-      await updateDoc(doc(db, "alumnos", alumnoAEditarId), { nombre: editNombre, email: editEmail.toLowerCase() });
-      cargarDatos(); setMensaje(`✅ Actualizado.`);
+      await updateDoc(doc(db, "alumnos", alumnoAEditarId), { 
+        nombre: editNombre, 
+        email: editEmail.toLowerCase(),
+        "creditos.grupal": parseInt(editCreditosGrupal) || 0,
+        "creditos.individual": parseInt(editCreditosIndividual) || 0
+      });
+      cargarDatos(); setMensaje(`✅ Datos y créditos actualizados.`);
     } catch (error) { setMensaje("❌ Error."); }
     setTimeout(() => setMensaje(""), 4000);
   };
 
   const borrarAlumno = async () => {
-    if (!alumnoSeleccionado) { setMensaje("⚠️ Seleccioná alumno."); setTimeout(() => setMensaje(""), 4000); return; }
-    const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
+    if (!alumnoAEditarId) { setMensaje("⚠️ Seleccioná alumno en el menú de Editar/Borrar."); setTimeout(() => setMensaje(""), 4000); return; }
+    const alumno = alumnos.find((a) => a.id === alumnoAEditarId);
     if (!window.confirm(`⚠️ ¿Borrar a ${alumno.nombre} definitivamente?`)) return;
     setMensaje("⏳ Borrando...");
     try {
@@ -282,7 +295,6 @@ export default function App() {
       cargarDatos();
       setMensaje(""); 
       
-      // MAGIA: DESHACER BORRAR ALUMNO
       setDeshacerActivo({
         texto: `Alumno ${alumno.nombre} eliminado`,
         accion: async () => {
@@ -312,7 +324,6 @@ export default function App() {
       cargarDatos();
       setMensaje("");
 
-      // MAGIA: DESHACER PAGO
       setDeshacerActivo({
         texto: "Pago registrado",
         accion: async () => {
@@ -339,7 +350,6 @@ export default function App() {
       const nuevoRef = await addDoc(collection(db, "turnos_fijos"), { alumnoId: alumno.id, nombreAlumno: alumno.nombre, diaSemana: diaFijoSeleccionado, hora: horaSeleccionada, tipo: tipoClase });
       cargarDatos(); setMensaje("");
       
-      // MAGIA: DESHACER AGENDAR
       setDeshacerActivo({
         texto: "Turno fijo agendado",
         accion: async () => {
@@ -401,14 +411,13 @@ export default function App() {
   };
 
   const borrarTurno = async (turno) => {
-    if (!window.confirm("¿Eliminar clase de la agenda?")) return;
+    if (!window.confirm("¿Eliminar clase de la agenda? Si había varios iguales, asegurate de no borrar el equivocado.")) return;
     setMensaje("⏳ Borrando...");
     try {
       const coleccion = turno.esFijo ? "turnos_fijos" : "turnos_sueltos";
       await deleteDoc(doc(db, coleccion, turno.id));
       cargarDatos(); setMensaje("");
       
-      // MAGIA: DESHACER BORRAR TURNO
       setDeshacerActivo({
         texto: "Clase eliminada",
         accion: async () => {
@@ -435,20 +444,43 @@ export default function App() {
       }
       cargarDatos(); setMensaje("");
       
-      // MAGIA: DESHACER ASISTENCIA/AVISO
       setDeshacerActivo({
         texto: accion === "asistio" ? "Asistencia registrada" : "Aviso registrado",
         accion: async () => {
           setMensaje("⏳ Deshaciendo...");
           await deleteDoc(doc(db, "registro_clases", nuevoRegistroRef.id));
           if (accion === "asistio") {
-            await updateDoc(doc(db, "alumnos", alumno.id), { ["creditos." + turno.tipo]: alumno.creditos[turno.tipo] }); // Devolvemos el crédito original
+            await updateDoc(doc(db, "alumnos", alumno.id), { ["creditos." + turno.tipo]: alumno.creditos[turno.tipo] }); 
           }
           cargarDatos(); setDeshacerActivo(null);
           setMensaje("✅ Acción deshecha."); setTimeout(() => setMensaje(""), 3000);
         }
       });
     } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 2000); }
+  };
+
+  // NUEVO: BORRADOR SELECTIVO DE HISTORIAL (El botón "✖ Limpiar" del calendario)
+  const borrarRegistroHistorico = async (registro, turno) => {
+    if (!window.confirm("¿Querés limpiar este registro y liberar el día en el calendario?")) return;
+    setMensaje("⏳ Limpiando...");
+    try {
+      await deleteDoc(doc(db, "registro_clases", registro.id));
+      
+      // Si era "Listo", devolvemos el crédito para que no lo pierda
+      if (registro.estado === "descontado") {
+        const alumno = alumnos.find((a) => a.id === turno.alumnoId);
+        if (alumno) {
+          await updateDoc(doc(db, "alumnos", alumno.id), {
+            ["creditos." + turno.tipo]: (alumno.creditos[turno.tipo] || 0) + 1,
+          });
+        }
+      }
+      cargarDatos();
+      setMensaje("✅ Día limpio en el calendario.");
+    } catch (error) {
+      setMensaje("❌ Error al limpiar.");
+    }
+    setTimeout(() => setMensaje(""), 3000);
   };
 
   const confirmarReprogramacion = async () => {
@@ -469,7 +501,6 @@ export default function App() {
       
       setModalReprogramar(null); cargarDatos(); setMensaje("");
 
-      // MAGIA: DESHACER MOVER CLASE
       setDeshacerActivo({
         texto: "Clase movida",
         accion: async () => {
@@ -772,9 +803,19 @@ export default function App() {
                     </SelectMinimalista>
                     <InputMinimalista type="text" value={editNombre} onChange={(e) => setEditNombre(e.target.value)} />
                     <InputMinimalista type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
-                    <div style={{display: "flex", gap: "5px"}}>
+                    <div style={{ display: "flex", gap: "10px" }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: "10px", color: theme.textSec }}>Créd. Grupal</label>
+                        <InputMinimalista type="number" value={editCreditosGrupal} onChange={(e) => setEditCreditosGrupal(e.target.value)} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: "10px", color: theme.textSec }}>Créd. Indiv.</label>
+                        <InputMinimalista type="number" value={editCreditosIndividual} onChange={(e) => setEditCreditosIndividual(e.target.value)} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "5px", marginTop: "5px" }}>
                       <button onClick={guardarEdicionAlumno} style={{ flex: 1, padding: "10px", backgroundColor: theme.inputBg, border: "none", borderRadius: "8px", cursor: "pointer", fontSize:"12px", fontWeight:"600" }}>Guardar Edición</button>
-                      <button onClick={() => {setAlumnoSeleccionado(alumnoAEditarId); borrarAlumno()}} style={{ padding: "10px", backgroundColor: "#ffebee", color: "#ff3b30", border: "none", borderRadius: "8px", cursor: "pointer", fontSize:"12px", fontWeight:"600" }}>Borrar</button>
+                      <button onClick={() => borrarAlumno()} style={{ padding: "10px", backgroundColor: "#ffebee", color: "#ff3b30", border: "none", borderRadius: "8px", cursor: "pointer", fontSize:"12px", fontWeight:"600" }}>Borrar</button>
                     </div>
                   </div>
                 </div>
@@ -872,9 +913,33 @@ export default function App() {
                                   )}
 
                                   {bloqueado && !fueReprogramado && <div style={{ width: "100%", color: "#d32f2f", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#ffebee", padding: "4px", borderRadius: "4px" }}>⛔ Bloqueada</div>}
-                                  {fueReprogramado && <div style={{ width: "100%", color: "#0071e3", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#e6f2ff", padding: "4px", borderRadius: "4px" }}>➡️ Movida</div>}
-                                  {fueDescontado && <div style={{ width: "100%", color: "#34c759", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#e8f5e9", padding: "4px", borderRadius: "4px" }}>Listo</div>}
-                                  {fueCancelado && <div style={{ width: "100%", color: theme.textSec, fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: theme.bg, padding: "4px", borderRadius: "4px" }}>Cancel.</div>}
+                                  
+                                  {fueReprogramado && (
+                                    <div style={{ display: "flex", flexDirection: "column", width: "100%", alignItems: "center" }}>
+                                      <div style={{ width: "100%", color: "#0071e3", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#e6f2ff", padding: "4px", borderRadius: "4px" }}>➡️ Movida</div>
+                                      {esAdmin && !adminVistaAlumno && (
+                                        <button onClick={() => borrarRegistroHistorico(registroHistorico, turno)} style={{ background: "none", border: "none", color: "#ff3b30", cursor: "pointer", fontSize: "10px", marginTop: "2px", textDecoration: "underline", padding: "2px 0" }}>✖ Limpiar</button>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  {fueDescontado && (
+                                    <div style={{ display: "flex", flexDirection: "column", width: "100%", alignItems: "center" }}>
+                                      <div style={{ width: "100%", color: "#34c759", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#e8f5e9", padding: "4px", borderRadius: "4px" }}>Listo</div>
+                                      {esAdmin && !adminVistaAlumno && (
+                                        <button onClick={() => borrarRegistroHistorico(registroHistorico, turno)} style={{ background: "none", border: "none", color: "#ff3b30", cursor: "pointer", fontSize: "10px", marginTop: "2px", textDecoration: "underline", padding: "2px 0" }}>✖ Limpiar</button>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  {fueCancelado && (
+                                    <div style={{ display: "flex", flexDirection: "column", width: "100%", alignItems: "center" }}>
+                                      <div style={{ width: "100%", color: theme.textSec, fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: theme.bg, padding: "4px", borderRadius: "4px" }}>Cancel.</div>
+                                      {esAdmin && !adminVistaAlumno && (
+                                        <button onClick={() => borrarRegistroHistorico(registroHistorico, turno)} style={{ background: "none", border: "none", color: "#ff3b30", cursor: "pointer", fontSize: "10px", marginTop: "2px", textDecoration: "underline", padding: "2px 0" }}>✖ Limpiar</button>
+                                      )}
+                                    </div>
+                                  )}
 
                                   {esAdmin && !adminVistaAlumno && !bloqueado && !registroHistorico && (
                                     <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100%" }}>
