@@ -6,6 +6,7 @@ import {
   updateDoc,
   addDoc,
   deleteDoc,
+  setDoc
 } from "firebase/firestore";
 import {
   signInWithEmailAndPassword,
@@ -76,6 +77,9 @@ export default function App() {
   
   const [cargando, setCargando] = useState(true);
   const [mensaje, setMensaje] = useState("");
+  
+  // NUEVO ESTADO: CONTROL DEL DESHACER
+  const [deshacerActivo, setDeshacerActivo] = useState(null);
 
   const [usuarioFirebase, setUsuarioFirebase] = useState(null);
   const [emailLogin, setEmailLogin] = useState("");
@@ -100,7 +104,6 @@ export default function App() {
   const [editNombre, setEditNombre] = useState("");
   const [editEmail, setEditEmail] = useState("");
 
-  // ESTADOS NUEVOS: FASE 2
   const [fechaSuelta, setFechaSuelta] = useState(toLocalISO(new Date()));
   const [tipoBloqueo, setTipoBloqueo] = useState("dia_completo");
   const [bloqueoFecha1, setBloqueoFecha1] = useState(toLocalISO(new Date()));
@@ -108,10 +111,20 @@ export default function App() {
   const [bloqueoHora1, setBloqueoHora1] = useState("09:00");
   const [bloqueoHora2, setBloqueoHora2] = useState("12:00");
   
-  // MODAL REPROGRAMAR
   const [modalReprogramar, setModalReprogramar] = useState(null);
   const [reprogramarFecha, setReprogramarFecha] = useState(toLocalISO(new Date()));
   const [reprogramarHora, setReprogramarHora] = useState("18:00");
+
+  // Efecto para ocultar el botón "Deshacer" a los 10 segundos
+  useEffect(() => {
+    let timer;
+    if (deshacerActivo) {
+      timer = setTimeout(() => {
+        setDeshacerActivo(null);
+      }, 10000);
+    }
+    return () => clearTimeout(timer);
+  }, [deshacerActivo]);
 
   useEffect(() => {
     const unsuscribe = onAuthStateChanged(auth, (user) => {
@@ -266,9 +279,23 @@ export default function App() {
       await deleteDoc(doc(db, "alumnos", alumno.id));
       const susTurnos = turnosFijos.filter((t) => t.alumnoId === alumno.id);
       for (let turno of susTurnos) await deleteDoc(doc(db, "turnos_fijos", turno.id));
-      setMensaje(`🗑️ Borrado.`); cargarDatos();
-    } catch (error) { setMensaje("❌ Error."); }
-    setTimeout(() => setMensaje(""), 4000);
+      cargarDatos();
+      setMensaje(""); 
+      
+      // MAGIA: DESHACER BORRAR ALUMNO
+      setDeshacerActivo({
+        texto: `Alumno ${alumno.nombre} eliminado`,
+        accion: async () => {
+          setMensaje("⏳ Restaurando alumno...");
+          await setDoc(doc(db, "alumnos", alumno.id), alumno);
+          for (let turno of susTurnos) await setDoc(doc(db, "turnos_fijos", turno.id), turno);
+          cargarDatos();
+          setDeshacerActivo(null);
+          setMensaje("✅ Alumno restaurado.");
+          setTimeout(() => setMensaje(""), 3000);
+        }
+      });
+    } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 4000); }
   };
 
   const registrarPago = async () => {
@@ -280,10 +307,28 @@ export default function App() {
       const fechaHoy = new Date().toLocaleDateString();
       const nuevoPago = { fecha: fechaHoy, tipo: tipoClase, cantidad: parseInt(packSeleccionado) };
       const historialActualizado = [...(alumno.historialPagos || []), nuevoPago];
+      
       await updateDoc(doc(db, "alumnos", alumno.id), { ["creditos." + tipoClase]: nuevosCreditos, ultimoPago: fechaHoy, historialPagos: historialActualizado });
-      setMensaje(`💰 Pago registrado!`); cargarDatos();
-    } catch (error) { setMensaje("❌ Error."); }
-    setTimeout(() => setMensaje(""), 4000);
+      cargarDatos();
+      setMensaje("");
+
+      // MAGIA: DESHACER PAGO
+      setDeshacerActivo({
+        texto: "Pago registrado",
+        accion: async () => {
+          setMensaje("⏳ Revirtiendo pago...");
+          await updateDoc(doc(db, "alumnos", alumno.id), {
+             ["creditos." + tipoClase]: alumno.creditos[tipoClase],
+             ultimoPago: alumno.ultimoPago,
+             historialPagos: alumno.historialPagos || []
+          });
+          cargarDatos();
+          setDeshacerActivo(null);
+          setMensaje("✅ Pago revertido.");
+          setTimeout(() => setMensaje(""), 3000);
+        }
+      });
+    } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 4000); }
   };
 
   const agendarTurnoFijo = async () => {
@@ -291,25 +336,38 @@ export default function App() {
     const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
     setMensaje("⏳ Asignando...");
     try {
-      await addDoc(collection(db, "turnos_fijos"), { alumnoId: alumno.id, nombreAlumno: alumno.nombre, diaSemana: diaFijoSeleccionado, hora: horaSeleccionada, tipo: tipoClase });
-      setMensaje(`✅ Fijado!`); cargarDatos();
-    } catch (error) { setMensaje("❌ Error."); }
-    setTimeout(() => setMensaje(""), 4000);
+      const nuevoRef = await addDoc(collection(db, "turnos_fijos"), { alumnoId: alumno.id, nombreAlumno: alumno.nombre, diaSemana: diaFijoSeleccionado, hora: horaSeleccionada, tipo: tipoClase });
+      cargarDatos(); setMensaje("");
+      
+      // MAGIA: DESHACER AGENDAR
+      setDeshacerActivo({
+        texto: "Turno fijo agendado",
+        accion: async () => {
+          await deleteDoc(doc(db, "turnos_fijos", nuevoRef.id));
+          cargarDatos(); setDeshacerActivo(null);
+        }
+      });
+    } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 4000); }
   };
 
-  // NUEVO: AGENDAR TURNO SUELTO
   const agendarTurnoSuelto = async () => {
     if (!alumnoSeleccionado) { setMensaje("⚠️ Seleccioná alumno."); setTimeout(() => setMensaje(""), 4000); return; }
     const alumno = alumnos.find((a) => a.id === alumnoSeleccionado);
     setMensaje("⏳ Asignando...");
     try {
-      await addDoc(collection(db, "turnos_sueltos"), { alumnoId: alumno.id, nombreAlumno: alumno.nombre, fechaISO: fechaSuelta, hora: horaSeleccionada, tipo: tipoClase });
-      setMensaje(`📌 Clase suelta agendada!`); cargarDatos();
-    } catch (error) { setMensaje("❌ Error."); }
-    setTimeout(() => setMensaje(""), 4000);
+      const nuevoRef = await addDoc(collection(db, "turnos_sueltos"), { alumnoId: alumno.id, nombreAlumno: alumno.nombre, fechaISO: fechaSuelta, hora: horaSeleccionada, tipo: tipoClase });
+      cargarDatos(); setMensaje("");
+      
+      setDeshacerActivo({
+        texto: "Clase suelta agendada",
+        accion: async () => {
+          await deleteDoc(doc(db, "turnos_sueltos", nuevoRef.id));
+          cargarDatos(); setDeshacerActivo(null);
+        }
+      });
+    } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 4000); }
   };
 
-  // NUEVO: CREAR BLOQUEO
   const crearBloqueo = async () => {
     setMensaje("⏳ Bloqueando...");
     try {
@@ -317,57 +375,116 @@ export default function App() {
       if (tipoBloqueo === "dia_completo") nuevoBloqueo.fechaISO = bloqueoFecha1;
       if (tipoBloqueo === "rango_dias") { nuevoBloqueo.fechaInicio = bloqueoFecha1; nuevoBloqueo.fechaFin = bloqueoFecha2; }
       if (tipoBloqueo === "rango_horas") { nuevoBloqueo.fechaISO = bloqueoFecha1; nuevoBloqueo.horaInicio = bloqueoHora1; nuevoBloqueo.horaFin = bloqueoHora2; }
-      await addDoc(collection(db, "bloqueos"), nuevoBloqueo);
-      setMensaje(`⛔ Agenda bloqueada.`); cargarDatos();
-    } catch (error) { setMensaje("❌ Error."); }
-    setTimeout(() => setMensaje(""), 4000);
+      const nuevoRef = await addDoc(collection(db, "bloqueos"), nuevoBloqueo);
+      cargarDatos(); setMensaje("");
+      
+      setDeshacerActivo({
+        texto: "Agenda bloqueada",
+        accion: async () => {
+          await deleteDoc(doc(db, "bloqueos", nuevoRef.id));
+          cargarDatos(); setDeshacerActivo(null);
+        }
+      });
+    } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 4000); }
   };
 
-  const borrarBloqueo = async (id) => {
-    await deleteDoc(doc(db, "bloqueos", id));
+  const borrarBloqueo = async (bloqueo) => {
+    await deleteDoc(doc(db, "bloqueos", bloqueo.id));
     cargarDatos();
+    setDeshacerActivo({
+      texto: "Bloqueo eliminado",
+      accion: async () => {
+        await setDoc(doc(db, "bloqueos", bloqueo.id), bloqueo);
+        cargarDatos(); setDeshacerActivo(null);
+      }
+    });
   };
 
-  const borrarTurno = async (id, esFijo) => {
+  const borrarTurno = async (turno) => {
     if (!window.confirm("¿Eliminar clase de la agenda?")) return;
-    await deleteDoc(doc(db, esFijo ? "turnos_fijos" : "turnos_sueltos", id));
-    cargarDatos();
+    setMensaje("⏳ Borrando...");
+    try {
+      const coleccion = turno.esFijo ? "turnos_fijos" : "turnos_sueltos";
+      await deleteDoc(doc(db, coleccion, turno.id));
+      cargarDatos(); setMensaje("");
+      
+      // MAGIA: DESHACER BORRAR TURNO
+      setDeshacerActivo({
+        texto: "Clase eliminada",
+        accion: async () => {
+          setMensaje("⏳ Restaurando clase...");
+          await setDoc(doc(db, coleccion, turno.id), turno);
+          cargarDatos(); setDeshacerActivo(null);
+          setMensaje("✅ Clase restaurada."); setTimeout(() => setMensaje(""), 3000);
+        }
+      });
+    } catch(e) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 4000); }
   };
 
   const procesarClaseDelDia = async (turno, fechaISO, fechaExacta, accion) => {
     setMensaje("⏳ Procesando...");
     try {
+      const alumno = alumnos.find((a) => a.id === turno.alumnoId);
+      let nuevoRegistroRef = null;
+      
       if (accion === "asistio") {
-        const alumno = alumnos.find((a) => a.id === turno.alumnoId);
         await updateDoc(doc(db, "alumnos", alumno.id), { ["creditos." + turno.tipo]: alumno.creditos[turno.tipo] - 1 });
-        await addDoc(collection(db, "registro_clases"), { turnoFijoId: turno.id, fechaISO: fechaISO, fechaExacta: fechaExacta, estado: "descontado" });
+        nuevoRegistroRef = await addDoc(collection(db, "registro_clases"), { turnoFijoId: turno.id, fechaISO: fechaISO, fechaExacta: fechaExacta, estado: "descontado" });
       } else if (accion === "aviso") {
-        await addDoc(collection(db, "registro_clases"), { turnoFijoId: turno.id, fechaISO: fechaISO, fechaExacta: fechaExacta, estado: "ausente_aviso" });
+        nuevoRegistroRef = await addDoc(collection(db, "registro_clases"), { turnoFijoId: turno.id, fechaISO: fechaISO, fechaExacta: fechaExacta, estado: "ausente_aviso" });
       }
-      cargarDatos();
-    } catch (error) { setMensaje("❌ Error."); }
-    setTimeout(() => setMensaje(""), 2000);
+      cargarDatos(); setMensaje("");
+      
+      // MAGIA: DESHACER ASISTENCIA/AVISO
+      setDeshacerActivo({
+        texto: accion === "asistio" ? "Asistencia registrada" : "Aviso registrado",
+        accion: async () => {
+          setMensaje("⏳ Deshaciendo...");
+          await deleteDoc(doc(db, "registro_clases", nuevoRegistroRef.id));
+          if (accion === "asistio") {
+            await updateDoc(doc(db, "alumnos", alumno.id), { ["creditos." + turno.tipo]: alumno.creditos[turno.tipo] }); // Devolvemos el crédito original
+          }
+          cargarDatos(); setDeshacerActivo(null);
+          setMensaje("✅ Acción deshecha."); setTimeout(() => setMensaje(""), 3000);
+        }
+      });
+    } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 2000); }
   };
 
-  // NUEVO: CONFIRMAR REPROGRAMACION
   const confirmarReprogramacion = async () => {
     setMensaje("⏳ Reprogramando...");
     try {
+      let nuevoRegistroRef = null;
+      let originalSueltoTurno = null;
+      let nuevoTurnoSueltoRef = null;
+
       if (modalReprogramar.clase.esFijo) {
-        // Marcamos la original como reprogramada en ese día
-        await addDoc(collection(db, "registro_clases"), { turnoFijoId: modalReprogramar.clase.id, fechaISO: modalReprogramar.fechaOriginalISO, estado: "reprogramado" });
+        nuevoRegistroRef = await addDoc(collection(db, "registro_clases"), { turnoFijoId: modalReprogramar.clase.id, fechaISO: modalReprogramar.fechaOriginalISO, estado: "reprogramado" });
       } else {
-        // Si ya era suelta, la borramos y creamos una nueva
+        originalSueltoTurno = turnosSueltos.find(t => t.id === modalReprogramar.clase.id);
         await deleteDoc(doc(db, "turnos_sueltos", modalReprogramar.clase.id));
       }
-      // Creamos la nueva clase suelta en destino
-      await addDoc(collection(db, "turnos_sueltos"), { alumnoId: modalReprogramar.clase.alumnoId, nombreAlumno: modalReprogramar.clase.nombreAlumno, fechaISO: reprogramarFecha, hora: reprogramarHora, tipo: modalReprogramar.clase.tipo });
       
-      setMensaje("✅ Clase movida con éxito.");
-      setModalReprogramar(null);
-      cargarDatos();
-    } catch(e) { setMensaje("❌ Error al mover clase."); }
-    setTimeout(() => setMensaje(""), 3000);
+      nuevoTurnoSueltoRef = await addDoc(collection(db, "turnos_sueltos"), { alumnoId: modalReprogramar.clase.alumnoId, nombreAlumno: modalReprogramar.clase.nombreAlumno, fechaISO: reprogramarFecha, hora: reprogramarHora, tipo: modalReprogramar.clase.tipo });
+      
+      setModalReprogramar(null); cargarDatos(); setMensaje("");
+
+      // MAGIA: DESHACER MOVER CLASE
+      setDeshacerActivo({
+        texto: "Clase movida",
+        accion: async () => {
+          setMensaje("⏳ Deshaciendo movimiento...");
+          await deleteDoc(doc(db, "turnos_sueltos", nuevoTurnoSueltoRef.id));
+          if (modalReprogramar.clase.esFijo) {
+            await deleteDoc(doc(db, "registro_clases", nuevoRegistroRef.id));
+          } else {
+            await setDoc(doc(db, "turnos_sueltos", originalSueltoTurno.id), originalSueltoTurno);
+          }
+          cargarDatos(); setDeshacerActivo(null);
+          setMensaje("✅ Clase devuelta a su lugar."); setTimeout(() => setMensaje(""), 3000);
+        }
+      });
+    } catch(e) { setMensaje("❌ Error al mover."); setTimeout(() => setMensaje(""), 3000); }
   };
 
   const saltarAdelante = () => setSemanaOffset((prev) => prev + (vistaCalendario === "mes" ? 4 : 1));
@@ -376,7 +493,6 @@ export default function App() {
 
   const esAdmin = CORREOS_ADMIN.includes(usuarioFirebase?.email);
 
-  // EVALUADOR DE BLOQUEOS
   const isClassBlocked = (claseHora, diaISO) => {
     return bloqueos.some(b => {
       if (b.tipo === "dia_completo" && b.fechaISO === diaISO) return true;
@@ -386,9 +502,6 @@ export default function App() {
     });
   };
 
-  // ==========================================
-  // PANTALLA 1: LOGIN (Simplificado en lógica, igual visual)
-  // ==========================================
   if (!usuarioFirebase) {
     return (
       <div style={{ backgroundColor: theme.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: globalFont }}>
@@ -429,13 +542,21 @@ export default function App() {
     );
   }
 
-  // ==========================================
-  // RENDER PRINCIPAL (ADMIN Y ALUMNO)
-  // ==========================================
   return (
     <div style={{ backgroundColor: theme.bg, minHeight: "100vh", fontFamily: globalFont, padding: "20px 10px", position: "relative" }}>
       
-      {/* MODAL DE REPROGRAMACIÓN FLOTANTE */}
+      {/* TOAST DE DESHACER (FLOTANTE ABAJO) */}
+      {deshacerActivo && (
+        <div style={{ position: "fixed", bottom: "20px", left: "50%", transform: "translateX(-50%)", backgroundColor: "#1d1d1f", color: "white", padding: "14px 24px", borderRadius: "30px", display: "flex", alignItems: "center", gap: "20px", boxShadow: "0 10px 40px rgba(0,0,0,0.3)", zIndex: 9999, width: "90%", maxWidth: "350px", justifyContent: "space-between" }}>
+          <span style={{ fontSize: "14px", fontWeight: "500", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{deshacerActivo.texto}</span>
+          <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+            <button onClick={deshacerActivo.accion} style={{ backgroundColor: "transparent", border: "none", color: "#0071e3", fontWeight: "700", cursor: "pointer", fontSize: "14px", padding: 0 }}>Deshacer</button>
+            <button onClick={() => setDeshacerActivo(null)} style={{ background: "none", border: "none", color: "#86868b", cursor: "pointer", fontSize: "14px", padding: 0 }}>✖</button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE REPROGRAMACIÓN */}
       {modalReprogramar && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ backgroundColor: theme.card, padding: "25px", borderRadius: theme.radius, width: "90%", maxWidth: "340px", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
@@ -482,7 +603,7 @@ export default function App() {
           </div>
         </div>
 
-        {mensaje !== "" && (
+        {mensaje !== "" && !deshacerActivo && (
           <div style={{ backgroundColor: mensaje.includes("❌") || mensaje.includes("⚠️") ? "#ffebee" : "#e8f5e9", color: mensaje.includes("❌") || mensaje.includes("⚠️") ? "#d32f2f" : "#2e7d32", padding: "10px 15px", borderRadius: "10px", marginBottom: "20px", fontSize: "13px", fontWeight: "500", textAlign: "center" }}>
             {mensaje}
           </div>
@@ -612,7 +733,7 @@ export default function App() {
                         {b.tipo === "rango_dias" && `✈️ Del ${b.fechaInicio} al ${b.fechaFin}`}
                         {b.tipo === "rango_horas" && `⏱️ ${b.fechaISO} (${b.horaInicio} a ${b.horaFin})`}
                       </span>
-                      <button onClick={() => borrarBloqueo(b.id)} style={{ background: "none", border: "none", color: "#ff3b30", cursor: "pointer" }}>✖</button>
+                      <button onClick={() => borrarBloqueo(b)} style={{ background: "none", border: "none", color: "#ff3b30", cursor: "pointer" }}>✖</button>
                     </div>
                   ))}
                 </div>
@@ -684,15 +805,12 @@ export default function App() {
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${hayClasesElSabado ? 6 : 5}, minmax(68px, 1fr))`, gap: "6px", minWidth: "340px" }}>
             {diasAMostrar.map((diaObj, index) => {
               
-              // RECOPILAR CLASES DEL DÍA (FIJAS + SUELTAS)
               const clasesHoy = [];
               turnosFijos.forEach(t => { if(t.diaSemana === diaObj.nombreBase) clasesHoy.push({...t, esFijo: true}); });
               turnosSueltos.forEach(t => { if(t.fechaISO === diaObj.fechaISO) clasesHoy.push({...t, esFijo: false}); });
               
-              // FILTRAR SI ES VISTA DE ALUMNO
               const clasesMostrar = (!esAdmin || adminVistaAlumno) ? clasesHoy.filter(t => t.alumnoId === miPerfil.id) : clasesHoy;
 
-              // AGRUPAR POR HORA (Solo si es admin)
               const clasesAgrupadas = {};
               clasesMostrar.forEach((turno) => {
                 const claveGrupo = `${turno.hora}-${turno.tipo}`;
@@ -716,7 +834,6 @@ export default function App() {
                     return (
                       <div key={claveUnicaBloque} style={{ backgroundColor: theme.card, borderRadius: "8px", boxShadow: theme.shadow, overflow: "hidden" }}>
                         
-                        {/* CABECERA BLOQUE (ADMIN) O ÚNICA (ALUMNO) */}
                         {esAdmin && !adminVistaAlumno ? (
                           <div onClick={() => toggleBloque(claveUnicaBloque)} style={{ padding: "6px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: "2px", borderBottom: estaExpandido ? `1px solid ${theme.bg}` : "none", backgroundColor: bloque.tipo === "grupal" ? "#fffdf5" : "transparent" }}>
                             <strong style={{ fontSize: "12px", color: theme.text }}>{bloque.hora}</strong>
@@ -730,14 +847,12 @@ export default function App() {
                           </div>
                         )}
 
-                        {/* LISTA DE ALUMNOS DENTRO DEL BLOQUE */}
                         {(estaExpandido || (!esAdmin || adminVistaAlumno)) && (
                           <div style={{ padding: "4px" }}>
                             {bloque.alumnos.map((turno) => {
                               const alumno = alumnos.find((a) => a.id === turno.alumnoId);
                               const creditosTotales = alumno ? alumno.creditos[turno.tipo] : 0;
                               
-                              // VERIFICAR ESTADOS (Bloqueado, Reprogramado, Asistio, etc)
                               const bloqueado = isClassBlocked(turno.hora, diaObj.fechaISO);
                               const registroHistorico = registros.find((r) => r.turnoFijoId === turno.id && (r.fechaISO === diaObj.fechaISO || r.fechaExacta === diaObj.fechaExacta));
                               const fueReprogramado = registroHistorico?.estado === "reprogramado";
@@ -756,13 +871,11 @@ export default function App() {
                                     </div>
                                   )}
 
-                                  {/* LABELS DE ESTADO */}
                                   {bloqueado && !fueReprogramado && <div style={{ width: "100%", color: "#d32f2f", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#ffebee", padding: "4px", borderRadius: "4px" }}>⛔ Bloqueada</div>}
                                   {fueReprogramado && <div style={{ width: "100%", color: "#0071e3", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#e6f2ff", padding: "4px", borderRadius: "4px" }}>➡️ Movida</div>}
                                   {fueDescontado && <div style={{ width: "100%", color: "#34c759", fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: "#e8f5e9", padding: "4px", borderRadius: "4px" }}>Listo</div>}
                                   {fueCancelado && <div style={{ width: "100%", color: theme.textSec, fontSize: "10px", fontWeight: "600", textAlign: "center", backgroundColor: theme.bg, padding: "4px", borderRadius: "4px" }}>Cancel.</div>}
 
-                                  {/* BOTONES DE ACCIÓN (Solo Admin, y si la clase está "activa") */}
                                   {esAdmin && !adminVistaAlumno && !bloqueado && !registroHistorico && (
                                     <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100%" }}>
                                       <div style={{ display: "flex", gap: "2px" }}>
@@ -771,12 +884,11 @@ export default function App() {
                                       </div>
                                       <div style={{ display: "flex", justifyContent: "space-between", padding: "0 4px" }}>
                                         <button onClick={() => procesarClaseDelDia(turno, diaObj.fechaISO, diaObj.fechaExacta, "aviso")} style={{ background: "none", border: "none", color: theme.textSec, cursor: "pointer", fontSize: "10px", textDecoration: "underline" }}>Aviso</button>
-                                        <button onClick={() => borrarTurno(turno.id, turno.esFijo)} style={{ background: "none", border: "none", color: "#ff3b30", cursor: "pointer", fontSize: "10px", textDecoration: "underline" }}>Borrar</button>
+                                        <button onClick={() => borrarTurno(turno)} style={{ background: "none", border: "none", color: "#ff3b30", cursor: "pointer", fontSize: "10px", textDecoration: "underline" }}>Borrar</button>
                                       </div>
                                     </div>
                                   )}
 
-                                  {/* BOTONES ACCIÓN (ALUMNO) - Solo avisar */}
                                   {(!esAdmin || adminVistaAlumno) && !bloqueado && !registroHistorico && (
                                     <button onClick={() => procesarClaseDelDia(turno, diaObj.fechaISO, diaObj.fechaExacta, "aviso")} style={{ marginTop: "6px", width: "100%", backgroundColor: "transparent", border: `1px solid ${theme.border}`, color: theme.text, borderRadius: "6px", padding: "6px 2px", cursor: "pointer", fontSize: "10px", fontWeight: "600" }}>Avisar inasistencia</button>
                                   )}
