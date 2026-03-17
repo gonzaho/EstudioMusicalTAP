@@ -79,6 +79,9 @@ export default function App() {
   const [mensaje, setMensaje] = useState("");
   
   const [deshacerActivo, setDeshacerActivo] = useState(null);
+  
+  // NUEVO: ESTADO PARA LA INSTALACIÓN DE LA APP (PWA)
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   const [usuarioFirebase, setUsuarioFirebase] = useState(null);
   const [emailLogin, setEmailLogin] = useState("");
@@ -117,15 +120,24 @@ export default function App() {
   const [reprogramarFecha, setReprogramarFecha] = useState(toLocalISO(new Date()));
   const [reprogramarHora, setReprogramarHora] = useState("18:00");
 
+  // Efecto para ocultar el botón "Deshacer" a los 10 segundos
   useEffect(() => {
     let timer;
     if (deshacerActivo) {
-      timer = setTimeout(() => {
-        setDeshacerActivo(null);
-      }, 10000);
+      timer = setTimeout(() => setDeshacerActivo(null), 10000);
     }
     return () => clearTimeout(timer);
   }, [deshacerActivo]);
+
+  // NUEVO: CAPTURAR EL EVENTO DE INSTALACIÓN
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
 
   useEffect(() => {
     const unsuscribe = onAuthStateChanged(auth, (user) => {
@@ -133,6 +145,26 @@ export default function App() {
     });
     return () => unsuscribe();
   }, []);
+
+  // NUEVO: FUNCIÓN DEL BOTÓN INSTALAR
+  const handleInstalarApp = async () => {
+    if (deferredPrompt) {
+      // Mostrar el cartel nativo de instalación (Android/Desktop)
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      // Si no hay cartel automático, comprobamos si es iPhone/iPad
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      if (isIOS) {
+        alert("Para instalar en iPhone: Tocá el ícono 'Compartir' (cuadradito con flecha) en la barra inferior de Safari y elegí la opción 'Agregar a inicio'.");
+      } else {
+        alert("Para instalar la aplicación, buscá la opción 'Agregar a la pantalla principal' o 'Instalar App' en el menú de tu navegador (los tres puntitos).");
+      }
+    }
+  };
 
   const iniciarSesion = async (e) => {
     e.preventDefault();
@@ -245,7 +277,6 @@ export default function App() {
 
   const toggleAcordeon = (nombre) => setAcordeonAbierto(acordeonAbierto === nombre ? "" : nombre);
 
-  // SELECCIONAR ALUMNO PARA EDITAR (Ahora trae también los créditos)
   const seleccionarAlumnoAEditar = (id) => {
     setAlumnoAEditarId(id);
     const al = alumnos.find(a => a.id === id);
@@ -267,7 +298,6 @@ export default function App() {
     setTimeout(() => setMensaje(""), 4000);
   };
 
-  // GUARDAR EDICIÓN DE ALUMNO (Ahora actualiza los créditos forzados manualmente)
   const guardarEdicionAlumno = async () => {
     if (!alumnoAEditarId) { setMensaje("⚠️ Seleccioná alumno."); setTimeout(() => setMensaje(""), 4000); return; }
     setMensaje("⏳ Actualizando...");
@@ -459,14 +489,11 @@ export default function App() {
     } catch (error) { setMensaje("❌ Error."); setTimeout(() => setMensaje(""), 2000); }
   };
 
-  // NUEVO: BORRADOR SELECTIVO DE HISTORIAL (El botón "✖ Limpiar" del calendario)
   const borrarRegistroHistorico = async (registro, turno) => {
     if (!window.confirm("¿Querés limpiar este registro y liberar el día en el calendario?")) return;
     setMensaje("⏳ Limpiando...");
     try {
       await deleteDoc(doc(db, "registro_clases", registro.id));
-      
-      // Si era "Listo", devolvemos el crédito para que no lo pierda
       if (registro.estado === "descontado") {
         const alumno = alumnos.find((a) => a.id === turno.alumnoId);
         if (alumno) {
@@ -533,13 +560,18 @@ export default function App() {
     });
   };
 
+  // ==========================================
+  // PANTALLA 1: LOGIN (CON BOTÓN DE INSTALAR)
+  // ==========================================
   if (!usuarioFirebase) {
     return (
       <div style={{ backgroundColor: theme.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: globalFont }}>
         <div style={{ padding: "40px", width: "100%", maxWidth: "360px", backgroundColor: theme.card, borderRadius: theme.radius, boxShadow: theme.shadow, textAlign: "center" }}>
           <h1 style={{ color: theme.text, marginBottom: "8px", fontSize: "24px", fontWeight: "700" }}>Estudio Musical TAP</h1>
           <p style={{ color: theme.textSec, marginBottom: "30px", fontSize: "14px" }}>Ingresá para ver tu agenda</p>
+          
           {mensaje !== "" && <div style={{ color: mensaje.includes("❌") ? "#ff3b30" : "#34c759", fontSize: "14px", marginBottom: "20px", fontWeight: "500" }}>{mensaje}</div>}
+          
           <form onSubmit={isRegistrando ? registrarse : iniciarSesion} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <InputMinimalista type="email" placeholder="Correo electrónico" value={emailLogin} onChange={(e) => setEmailLogin(e.target.value)} required />
             <div style={{ position: "relative" }}>
@@ -548,9 +580,16 @@ export default function App() {
             </div>
             <BotonAzul type="submit" style={{ marginTop: "10px" }}>{isRegistrando ? "Crear cuenta" : "Ingresar"}</BotonAzul>
           </form>
+          
           <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "15px" }}>
             <button onClick={() => setIsRegistrando(!isRegistrando)} style={{ background: "none", border: "none", color: theme.blue, fontWeight: "500", cursor: "pointer", fontSize: "14px" }}>{isRegistrando ? "¿Ya tenés cuenta? Iniciá sesión" : "Crear una cuenta nueva"}</button>
             <button onClick={recuperarPassword} style={{ background: "none", border: "none", color: theme.textSec, cursor: "pointer", fontSize: "13px", textDecoration: "underline" }}>Olvidé mi contraseña</button>
+            
+            {/* NUEVO BOTÓN PARA INSTALAR LA APP */}
+            <hr style={{ border: "none", borderTop: `1px solid ${theme.border}`, margin: "5px 0" }} />
+            <button onClick={handleInstalarApp} style={{ background: theme.card, border: `1px solid ${theme.blue}`, color: theme.blue, padding: "12px", borderRadius: "20px", cursor: "pointer", fontSize: "14px", fontWeight: "600", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", transition: "0.2s" }}>
+              📲 Instalar Aplicación
+            </button>
           </div>
         </div>
       </div>
@@ -576,7 +615,7 @@ export default function App() {
   return (
     <div style={{ backgroundColor: theme.bg, minHeight: "100vh", fontFamily: globalFont, padding: "20px 10px", position: "relative" }}>
       
-      {/* TOAST DE DESHACER (FLOTANTE ABAJO) */}
+      {/* TOAST DE DESHACER */}
       {deshacerActivo && (
         <div style={{ position: "fixed", bottom: "20px", left: "50%", transform: "translateX(-50%)", backgroundColor: "#1d1d1f", color: "white", padding: "14px 24px", borderRadius: "30px", display: "flex", alignItems: "center", gap: "20px", boxShadow: "0 10px 40px rgba(0,0,0,0.3)", zIndex: 9999, width: "90%", maxWidth: "350px", justifyContent: "space-between" }}>
           <span style={{ fontSize: "14px", fontWeight: "500", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{deshacerActivo.texto}</span>
